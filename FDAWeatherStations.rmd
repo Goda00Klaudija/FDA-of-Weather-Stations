@@ -1,0 +1,794 @@
+---
+title: "Functional data analysis of of 73 spanish weather stations"
+author:
+- Janina Adomaitytė^[Faculty of Mathematics and Informatics, janina.adomaityte@mif.stud.vu.lt]
+- Goda Kovalenkinaitė^[Faculty of Mathematics and Informatics, goda.kovalenkinaite@mif.stud.vu.lt]
+date: "March 10th, 2022"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+  toc: true
+---
+
+\tableofcontents
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This technical report is a functional data analysis application on a chosen data set. The data that we intend to use is the weather data set based in Spain, by the name ‘aemet’ from the R library ‘fda.usc’. It contains information on 73 weather stations and data on three main functional variables, that is, average wind speed, temperature and precipitation. It was collected every single day for the period of 29 years, and the daily average was found. 
+
+The goal of the work is to perform the functional data analysis and present results for two variables, wind speed and temperature.
+
+### Tasks
+
+In order to reach our goals, the following tasks were completed:
+
+* Smooth out the chosen variables,
+* Analyse descriptive statistics,
+* Find first and second derivatives,
+* Perform Principal Component Analysis,
+* Find functional depth of observed curves;
+* Detect functional outliers,
+* Complete Hypothesis testing,
+* Conclude results.
+
+## Loading data and smoothing
+Before starting exploratory data analysis, smoothing is the very first step, as it converts discrete data points into a function. Smoothing helps to identify patterns in the data by minimizing short-term deviations due to observational errors. 
+
+``` {r, include=TRUE, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+#install.packages("fda.usc")
+library(fda.usc)
+data("aemet")
+aemet_temp <- aemet$temp
+aemet_wind <- aemet$wind.speed
+class(aemet_temp)
+class(aemet_wind)
+library(dplyr)
+library(fda)
+library(fdANOVA)
+
+```
+
+We will use optim.np function from fda.usc package to smooth average temperature data and average wind speed data. This function performs smoothing using non-parametric kernel estimation with cross-validation (CV) or generalized cross-validation (GCV) methods. We will use two different types of smoothing matrices: Nadaraya-Watson kernel estimator (S.NW) 
+and Local Linear Smoothing (S.LLR) with bandwidth parameter h.
+
+### Smoothing average temperature data with S.NW
+
+The Nadaraya-Watson kernel estimator of x(t) is defined by
+$$
+\hat{x}_h(t) = \frac{\sum_{i=1}^{m}K((t_i − t)/h)y_i}{\sum_{i=1}^{m}K((t_i − t)/h)}
+$$
+where K is a kernel function and a constant h > 0 called the bandwidth or smoothing parameter.
+
+```{r pressure, include=TRUE, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+temp_np <- optim.np(aemet_temp, type.S = S.NW, par.CV = list(criteria = "GCV"))
+plot(temp_np$fdata.est)
+```
+
+
+### Smoothing average temperature data with S.LLR
+
+```{r pressure1, include=TRUE, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+temp_np1 <- optim.np(aemet_temp, type.S = S.LLR, par.CV = list(criteria = "GCV"))
+plot(temp_np1$fdata.est)
+```
+
+
+### GCV criteria for average temperature data
+
+Generalized cross-validation (GCV) rule is used to better choose h. R function optim.np from fda.usc helps us to minimize GCV by choosing optimal h.
+
+```{r pressure4, include=TRUE, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+plot(temp_np$h, temp_np$gcv, type = "l", main = "GCV criteria  by optim.np() ", 
+     xlab = "Bandwidth (h) values",ylab = "GCV criteria", col = 3, lwd = 2)
+legend(x = 3, y = 4.3, legend = c("Ker.norm-S.NW", "Ker.norm-S.LLR"),
+       box.col = "white", lwd = c(2, 2, 2), col = c(3, 4, 2),cex = 0.75)
+lines(temp_np1$h,temp_np1$gcv, col = 4, lwd = 2)
+```
+
+Figure displays the GCV curve versus bandwidth h. 
+
+We can check how different smoothing worked on A CORUÑA weather station for average temperature in the followwing graph.
+
+
+```{r pressure5, include=TRUE, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+ind <- 1
+nam <- expression( paste("A CORUÑA Temp curve") )
+plot(aemet_temp[ind, ], main = nam, lty = 2, lwd = 2, col = 8)
+legend(x = 0, y = 19, legend = c("Curve",
+                                  "Ker.norm-S.NW", "Ker.norm-S.LLR"),
+       lty = c(2, 1, 1, 1, 1), lwd = 2, col = c(8, 1, 3, 4, 2), box.col = "white")
+lines(temp_np$fdata.est[ind, ], col = 3, lty = 1, lwd = 2)
+lines(temp_np1$fdata.est[ind, ], col = 4, lty = 1, lwd = 2)
+```
+
+To identify better result, we must check which method gave smaller GCV value:
+
+The h value that minimizes GCV for S.NW smoothing:
+```{r pressure12, echo=TRUE}
+temp_np$h.opt
+```
+The minimum of GCV value:
+```{r pressure122, echo=TRUE}
+temp_np$gcv.opt
+```
+The h value that minimizes GCV for S.LLR smoothing:
+```{r pressure11, echo=TRUE}
+temp_np1$h.opt
+```
+The minimum of GCV value:
+```{r pressure111, echo=TRUE}
+temp_np1$gcv.opt
+```
+
+The results show, that Nadaraya-Watson kernel estimator (S.NW) smoothing gave better result than the Local Linear Smoothing (S.LLR). For exploratory data analysis for average temperature we will use smoothed data with S.NW kernel estimator and h=6.193605.
+
+### Smoothing for average wind speed data
+
+For average wind speed data, we will use function optim.basis from fda.usc package. This function lets us estimate functional data with basis representation using cross-validation (CV) or generalized cross-validation (GCV) method with a roughness penalty. We decided to use GCV in order to achieve optimal parametrical  smoothing.
+
+First, we define possible values for lambda and number of basis:
+```{r pressure6, echo=TRUE}
+l <- c(0 ,2 ^ seq(-2, 9, len = 30))
+nb <- seq(7, 31, by = 2)
+```
+
+Then, we can smooth average wind speed data using GCV criteria.
+Smoothing average wind speed data with lambda = 393.6 and number of basis = 29:
+
+```{r pressure7, echo=TRUE}
+wind_param  <-  optim.basis(aemet_wind, lambda = l, numbasis = nb)
+opar <- par(mfrow=c(1,2))
+plot(wind_param$fdata.est)
+plot(wind_param$gcv["29",])
+par(opar)
+```
+
+Checking, how Bspline basis smoothing worked on A CORUÑA weather station for average wind speed:
+
+```{r pressure9, echo=TRUE}
+ind <- 1
+nam <- expression( paste("A CORUÑA wind speed curve") )
+plot(aemet_wind[ind, ], main = nam, lty = 2, lwd = 2, col = 8)
+legend(x = 200, y = 5, legend = c("Curve",
+                                  "Bspline basis"),
+       lty = c(2, 1, 1, 1, 1), lwd = 2, col = c(8, 1, 3, 4, 2), box.col = "white")
+lines(wind_param$fdata.est[ind, ], col = 3, lty = 1, lwd = 2)
+```
+
+The number of basis  that minimizes GCV:
+```{r pressure123, echo=TRUE}
+wind_param$numbasis.opt
+```
+
+The optimal lambda value that minimizes GCV:
+```{r pressure113, echo=TRUE}
+wind_param$lambda.opt
+```
+
+The minimum of GCV value:
+```{r pressure1223, echo=TRUE}
+wind_param$gcv.opt
+```
+
+## Descriptive statistics
+
+In this section, the analysis of descriptive statistics of our functional data will be performed. We are interested in mean, standard deviation and covariance surface. The functions from fda package will be used: mean.fd and sd.fd and var.fd. Also, the derivatives and principal component analysis will be included.
+
+### Mean for temperature
+
+```{r pressure12234, echo=TRUE, results=FALSE}
+fd_wind_param <- fdata2fd(wind_param$fdata.est)
+fd_temp_np <- fdata2fd(temp_np$fdata.est)
+mean <- mean.fd(fd_temp_np)
+plot(fd_temp_np)
+lines(mean, col = 2, lwd = 6)
+```
+
+The mean is represented by the thick red line. It contains a peak at just following the day 200, which is the month of august, validating the fact how temperature does increase during the summer period. 
+
+### Standart deviation for temperature
+
+The standard deviation shows the dispersion of a data set relative to its mean. 
+
+```{r pressure12238, echo=TRUE, results=FALSE}
+std <- sd.fd(fd_temp_np)
+plot(fd_temp_np, lwd=1)
+lines(mean, col = 2, lwd = 6)
+lines(mean+std, col = "blue", lty=2, lwd=6)
+lines(mean-std, col = "blue", lty=2, lwd=6)
+```
+
+The standard deviation of temperature is represented by the two thick blue dashed lines. The upper one represents the standard deviations addition to the mean and the lower one represents standard deviation subtracted from the mean. The distance between the mean and the dashed blue lines is seen to be wider during the beginning and the end of the year, aka. winter. S.d is narrower during the summer since there is less cluster around the mean during the summer months.
+
+### Covariance surface of temperature
+
+The covariance surface plot of the functional variable temperature show us the spread of our data values.
+
+```{r pressure1005, echo=TRUE}
+tempvar.bifd = var.fd(fd_temp_np)
+
+yeartime       = seq(0,365, length=53)
+tempvar_mat  = eval.bifd(yeartime, yeartime,
+                         tempvar.bifd)
+
+persp(yeartime, yeartime, tempvar_mat,
+      theta=-45, phi=25, r=3, expand = 0.5,
+      ticktype='detailed',
+      xlab="Day (Jan 1 to Dec 30)",
+      ylab="Day (Jan 1 to Dec 30)",
+      zlab="Variance(Temp)")
+```
+
+We can see the peaks at the end and the beginning of the year and a dip in the day 200 region. This graph is logically supported by previous standard deviation plot we’ve seen. During the summer season when s.d was the lowest, we can see the dip in the covariance surface plot. Likewise for the winter season when s.d was the highest. 
+
+### Contour of temperature covariance surface
+
+The contour of the covariance surface plot plots a 3-dimensional surface onto a  2-dimensional format by constant z-slices that are contours.  
+
+```{r pressure1025, echo=TRUE}
+contour(yeartime, yeartime, tempvar_mat,
+        xlab="Day (Jan 1 to Dec 30)",
+        ylab="Day (Jan 1 to Dec 30)")
+```
+
+Data for this contour plot could be shifted so that winter period would fall into the middle of our graph, it would possibly show a clearer peak in the middle of the graph; however, the conclusions would stay the same, that the peak is during winter period time, more specifically during the beginning and end of the year. 
+
+### Mean for wind speed
+
+```{r pressure12237, echo=TRUE, results=FALSE}
+mean1 <- mean.fd(fd_wind_param)
+plot(fd_wind_param)
+lines(mean1, col = 2, lwd = 6)
+```
+
+In regards to wind speed function variable - its mean is more or less around the value 4 meters per second throughout the whole time period, having a mere peak at day 100, which is a month of April.  
+
+### Standart deviation for wind speed
+
+```{r pressure12236, echo=TRUE, results=FALSE}
+std1 <- sd.fd(fd_wind_param)
+plot(fd_wind_param, lwd=1)
+lines(mean1, col = 2, lwd = 6)
+lines(mean1+std1, col = "blue", lty=2, lwd=6)
+lines(mean1-std1, col = "blue", lty=2, lwd=6)
+```
+
+The standard deviation for the wind speed looks more constant throughout the whole time period except at about the region of day 200. Possibility of more cluster around the mean during summer, the wind speed values of the 73 weather stations are more spread out containing more various values. 
+
+### Covariance surface of wind speed
+
+```{r pressure1002, echo=TRUE}
+wind.speed.var.bifd = var.fd(fd_wind_param)
+
+yeartime        = seq(0,365,length=29) #check implementation of 29years
+wind.speed.var_mat  = eval.bifd(yeartime , yeartime ,
+                         wind.speed.var.bifd)
+
+persp(yeartime , yeartime , wind.speed.var_mat,
+      theta=-45, phi=25, r=3, expand = 0.5,
+      ticktype='detailed',
+      xlab="Day (Jan 1 to Dec 30)",
+      ylab="Day (Jan 1 to Dec 30)",
+      zlab="variance(Wind Speed)")
+
+```
+
+The covariance surface of wind speed peaks at the end of the summer, respective to the previous standard deviation plot.  
+
+### Contour of wind speed covariance surface
+
+```{r pressure1011, echo=TRUE}
+contour(yeartime , yeartime , wind.speed.var_mat,
+        xlab="Day (Jan 1 to Dec 30)",
+        ylab="Day (Jan 1 to Dec 30)")
+```
+
+The contour of the wind speeds covariance surface shows the peak in the region of day 200, supporting our previous comments in regard to wind speed from standard deviation and the covariance surface plots.  
+
+## Derivatives
+
+Acceleration and velocity plays important part in functional data analysis. In 'aemet' data set we can see that the temperature and wind speed changes throughout the year.
+
+Velocity is a change in position per unit of time (for temperature, how much average temperature have changed in one day). Acceleration is defined as the rate of change of velocity (it is the derivative of velocity, we might be interested if changes in average temperature are stable).
+
+### First derivative of average temperature data
+
+```{r pressure0, echo=TRUE}
+vel <- fdata.deriv(temp_np$fdata.est, nderiv = 1)
+plot(vel, main= "First derivative")
+```
+
+The graph shows, that up until about day 200 (middle of July) the average temperature mostly increase in all weather stations with some fluctuations, later decrease is observed up until the end of the year.
+
+### Second derivative of average temperature data
+
+```{r pressure03, echo=TRUE}
+vel <- fdata.deriv(temp_np$fdata.est, nderiv = 2)
+plot(vel, main= "Second derivative")
+```
+
+Second derivative is near zero, identifying, that temperature increase and decrease steadily during the year.
+
+### First derivative of average wind speed data
+
+```{r pressure02, echo=TRUE}
+vel <- fdata.deriv(wind_param$fdata.est, nderiv = 1)
+plot(vel, main= "First derivative")
+```
+
+The first derivative of average wind speed data does not show some clearly notable pattern, suggesting, that average wind speed does not change too much during the year.
+
+### Second derivative of average wind speed data
+
+```{r pressure01, echo=TRUE}
+vel <- fdata.deriv(wind_param$fdata.est, nderiv = 2)
+plot(vel, main= "Second derivative")
+```
+
+Second derivative graph for average wind speed again is near zero, identifying, that avergae wind speed changes steadily during the year.
+
+## Principal Component Analysis - temperature
+
+The principal component functions are shown as a perturbation of the mean. The pluses show when principal component is added to the mean, and the minuses show the subtraction of the component. 
+
+```{r pressure1237, echo=TRUE, results=FALSE}
+nharm = 4
+temp.pcalist = pca.fd(fd_temp_np, nharm)
+attributes(temp.pcalist)
+temp.pcalist$harmonics
+print(temp.pcalist$values[1:4])
+plot.pca.fd(temp.pcalist)
+```
+
+We needed 4 components to represent our data well. The first component contains the strongest component, with variation primarily in the winter. The second component shows primarily summer variation and a correspondence to a time shift effect. 
+
+## Principal Component Analysis - wind Speed
+
+```{r pressure1027, echo=TRUE, results=FALSE}
+nharm = 7
+wind.speed.pcalist = pca.fd(fd_wind_param, nharm)
+attributes(wind.speed.pcalist)
+wind.speed.pcalist$harmonics
+print(wind.speed.pcalist$values[1:4])
+plot.pca.fd(wind.speed.pcalist)
+```
+
+For the Wind speed Principal component analysis, the function 1 shows steady variation throughout the whole time period. And second principal component corresponds to a time shift effect too, however wind speed functional variable needed 7 components to represent our data. 
+
+## Functional depth
+
+Functional data depth measures the centrality of observed curves. We are going to use Fraiman-Muniz and Modal depths in our work.
+
+### Fraiman-Muniz depth
+
+Fraiman-Muniz depth measures the conditional quantile on all points and then integrated. The R function depth.FM performs a ranking of depths.
+
+Fraiman-Muniz depth for average temperature data with trim value of 5%:
+
+```{r pressure001, echo=TRUE}
+out.FM=depth.FM(temp_np$fdata.est,trim=0.05,draw=TRUE)
+```
+
+The median deepest curve is in red color and it represents BARCELONA (FABRA) weather station.
+
+```{r pressure002, echo=TRUE}
+out.FM$lmed
+```
+
+Fraiman-Muniz depth for average wind speed data with trim value of 5%:
+
+```{r pressure003, echo=TRUE}
+out.FM_wind=depth.FM(wind_param$fdata.est,trim=0.05,draw=TRUE)
+```
+
+The SORIA weather station is represented.
+
+```{r pressure004, echo=TRUE}
+out.FM_wind$lmed
+```
+
+### Modal depth
+
+Subsequently, we are going to implement modal depth. The depth.mode function selects the curve most densely surrounded by others as the deepest one.
+
+Modal depth for average temperature data with trim value of 5%:
+
+```{r pressure005, echo=TRUE}
+out.mode_temp=depth.mode(temp_np$fdata.est,trim=0.05,draw=TRUE)
+```
+The deepest curve with this method for average temperature is for GIRONA/COSTA BRAVA weather station:
+
+```{r pressure006, echo=TRUE}
+out.mode_temp$lmed
+```
+
+Modal depth for average wind speed data with trim value of 5%:
+
+```{r pressure007, echo=TRUE}
+out.mode_wind=depth.mode(wind_param$fdata.est,trim=0.05,draw=TRUE)
+```
+
+This time the red curve is for SORIA again, same as it was for FM depth.
+
+```{r pressure008, echo=TRUE}
+out.mode_wind$lmed
+```
+
+## Functional outliers detection and box plots
+
+This section will investigate the most outlying curves in our data set, because it could bias functional estimates and also we are interested in finding the source which produced the outlying curve. We assume, that the curve is an outlier, if it is generated by stochastic process and it has different distribution than other curves. In order to identify outlying curves we use functional depths: if a curve is a outlier, it will have significant small depth. In order to indicate outliers, box plots could be used.
+
+The most outlying curve for average temperature is NAVACERRADA,PUERTO with depth of 0.02739726. Navacerrada station is located in the middle of Spain, and for it to be an outlying curve for temperature, might mean there could of been a measuring error.
+
+```{r pressure010, echo=TRUE}
+temp_fd<-fdata2fd(temp_np$fdata.est)
+boxplot(temp_fd)$depth[45]
+```
+The red dashed curve represents outlier; black line is a median curve and the pink section demonstrates the 50% central region. The two blue curves show the envelopes of 50% central region. 
+
+For average wind speed, we notice that we have even more outliers:
+
+```{r pressure011, echo=TRUE}
+wind_fd<-fdata2fd(wind_param$fdata.est)
+boxplot(wind_fd)$outpoint
+```
+
+The 6 outliers are such: 
+
+```{r pressure012, echo=TRUE, fig.show='hide'}
+boxplot(wind_fd)$depth[20]
+boxplot(wind_fd)$depth[34]
+boxplot(wind_fd)$depth[35]
+boxplot(wind_fd)$depth[36]
+boxplot(wind_fd)$depth[55]
+boxplot(wind_fd)$depth[56]
+```
+
+These weather stations are all located on islands or right next to the sea, and since wind speed is in fact more present near the sea, it caused these stations to be the outliers from the rest.
+
+## Hyphotesis testing
+
+For hypothesis testing, we first need to consider the groups we want to compare. Our data contains altitude information, this means, we can divide our data to different groups depending on the distance above sea level in meters. We have divided our data to three groups. If altitude is below 44 meters, then we consider weather station to be in the lowest altitude group. If it is between 44 and 600, then it's in the medium altitude group; and if it's more than 600 meters, we consider weather station to be in the highest altitude group.
+
+We did the hypothesis testing on whether these three groups were equal or not, with such hypothesis:
+
+$H_0$ : Group means are equal
+
+$H_1$ : Group means are not equal
+
+
+```{r pressure013, echo=TRUE, fig.show='hide'}
+aemet$df$factor <- ifelse(aemet$df$altitude <= 44, 'Lowest altitude', ifelse(aemet$df$altitude <= 600, 'Medium altitude', 'Highest altitude'))
+group.label <- factor(aemet$df$factor)
+```
+
+```{r pressure014, echo=FALSE, fig.show='hide'}
+fANOVA.pointwise <- function(data, groups, t.seq, alpha=0.05) {
+  n <- nrow(data)
+  pvals <- numeric(n)
+  lv <- levels(groups)
+  k <- length(lv)
+  mean.p <- matrix(NA, ncol=k, nrow=n)
+  perm <- factorial(k)/(factorial(2)*(factorial(k-2)))
+  Tukey.posthoc <- matrix(NA, ncol=perm, nrow=n)
+  for(i in 1:n) {
+    dt <- data.frame((data[i,]), groups)
+    names(dt) <- c("values", "groups")
+    av <- aov(values~groups, data = dt)
+    pvals[i] <- summary(av)[[1]]["Pr(>F)"][1,1]
+    mean.p[i,]  <- as.matrix((dt %>% group_by(groups) %>% summarise(mean(values)))[,2])
+    colnames(Tukey.posthoc) <- rownames(TukeyHSD(av)$groups)
+    Tukey.posthoc[i,] <- TukeyHSD(av)$groups[,4]
+  }
+  
+  overall_mean <- apply(data, 1, mean)
+  
+  opar1 <- par(mfrow=c(2,1))
+  
+  plot(t.seq, pvals, type="l", main = "Pointwise ANOVA p-values",
+       xlab = "Time", ylab="p-value", ylim=c(0,1))
+  lines(t.seq, rep(0.05, n), col="blue", lty=2)
+  
+  mn <- min(mean.p, overall_mean)
+  mx <- max(mean.p, overall_mean)
+  
+  plot(t.seq, overall_mean, type = "l", main = "Group means",
+       xlab = "Time", ylab = "Mean", ylim = c(mn-0.05, mx+0.05))
+  for(i in 1:k) {
+    lines(t.seq, mean.p[,i], col=i+1, lty=i+1)
+  }
+  
+  legend("topright", legend=c("Overall", lv), lty=1:(k+1), col=1:(k+1
+                                                                   ), cex = 0.4,  title="Group")
+  
+  par(opar1)
+  
+  
+  opar2 <- par(mfrow=c(1,1), ask = TRUE)
+  
+  for(i in 1:perm) {
+    plot(t.seq, Tukey.posthoc[,i], type="l", main = paste("Tukey HSD p-values", rownames(TukeyHSD(av)$groups)[i]),
+         xlab = "Time", ylab = "p-value", ylim = c(0,1))
+    lines(t.seq, rep(0.05, n), col="blue", lty=2)
+  }
+  
+  par(opar2)
+
+  return(list(p.values=pvals, TukeyHSD=Tukey.posthoc, gr.means = mean.p, overal.mean=overall_mean))
+} 
+```
+
+### Pointwise fANOVA for temperature
+
+The pointwise ANOVA p-values, Group means and Tukey HSD p-values will be presented between the lowest, medium and highest altitudes.
+
+```{r pressure015, echo=TRUE, results=FALSE}
+t.new2 <- seq(0, 365, length=1001)
+temp.eval <- eval.fd(t.new2, temp_fd)
+class(temp.eval)
+fANOVA.pointwise(data=temp.eval, groups=group.label, 
+                 t.seq=t.new2, alpha=0.05) 
+```
+
+ANOVA is applied, since we are analysing 3 independent groups that we've created, to see if there is a significant difference within those groups. ANOVA p-value is above 0.05 at day 200, thus not enough evidence to conclude that the group means are not equal throughout the whole time period, and such is supported by the next figure of 'Group means'. Where p-value is, in fact, lower than 0.05, the Group means are not equal, and opposite around the peak of day 200. 
+
+Tukey HSD (Honestly Significant Difference) test analyses the relationship further and in more depth between each group of ours. It is a useful post-hoc analysis since our groups are of unequal sample sizes. For all three consecutive graphs, the peak appears at day 200 as well, and at it, the p-value is above 0.05. Nonetheless, most of the plots have p-values of less than 0.05. This leads us to believe that groups do have the significant difference between comparisons at the 95% confidence level according to Tukey HSD. We can also conclude that the 'Medium altitude' group and the 'Highest altitude' group have least significant difference.
+
+### Functional ANOVA and MANOVA graphs for temperature
+
+```{r pressure016, echo=TRUE, results=FALSE}
+plotFANOVA(x = temp.eval, int = c(1, 365))
+plotFANOVA(x = temp.eval, group.label = as.character(group.label),
+           int = c(1, 365))
+plotFANOVA(x = temp.eval, group.label = as.character(group.label),
+           int = c(1, 365), separately = TRUE)
+plotFANOVA(x = temp.eval, group.label = as.character(group.label),
+           int = c(1, 365), means = TRUE)
+
+```
+
+These are the different variations of our temperature functional variable data. First one shows overall plot of Functional ANOVA; second plot has each colour represent a different group; third plot has each group plotted on separate graphs with a red line representing its mean; and lastly, fourth plot shows the mean of each groups functional ANOVA.
+
+The different groups of altitudes show very similar results, with the same peak at day 200. Weather stations that were located in lowest altitude region having highest group mean and highest altitude located weather stations have the lowest group mean.
+
+
+Analysis of variance for our functional data has been performed.
+
+```{r pressure017, echo=TRUE, results=TRUE}
+set.seed(123)
+(fanova4.fd <- fanova.tests(x = temp.eval, group.label = group.label, parallel = TRUE))
+```
+
+All of of the tests shown above p-values are near 0, consequently hypothesis $H_0$ will be rejected. Significant difference has been proven.
+
+### Functional basis for FP type test for temperature
+
+A different approach has been used for the analysis of variance of functional data.
+
+```{r pressure018, echo=TRUE, results=TRUE}
+own.basis.t <- temp_fd$coefs
+own.cross.prod.mat.t <- inprod(temp_fd$basis, temp_fd$basis)
+
+set.seed(123)
+
+fanova.tests(temp.eval, group.label,
+             test = c("FP", "GPF", "Fmaxb", "TRP"),
+             params = list(paramFP = list(B.FP = 1000, basis = "own", own.basis=own.basis.t,
+                                        own.cross.prod.mat=own.cross.prod.mat.t
+                                        ),
+                           paramFmaxb = 1000,
+                           paramTRP = list(k = c(10, 15),
+                                           projection = "BM",
+                                           permutation = TRUE,
+                                           B.TRP = 1000)))
+```
+
+Evidently, we have received same results as previously but of smaller range of tests. The test based on random projection was though done on two different k values (10 and 15), as requested per our code. Yet, the results on the difference in temperature between different altitudes, is the same.
+
+### Two sample F-type-test  for temperature
+
+```{r pressure024, echo=TRUE, results=FALSE}
+setwd("...\FDA\lesson9")
+temp_lowest<-temp_fd[c(7,8,12,14,15,17,19,20,21,22,31,34,35,36,46,49,55,57,58,62,65,66,70)]
+temp_medium<-temp_fd[c(1,2,3,4,6,9,10,11,13,16,24,26,27,30,33,32,38,47,48,50,51,52,60,61,64,67,73)]
+temp_highest<-temp_fd[c(5,18,23,25,28,29,37,39,40,41,42,42,44,45,53,54,56,59,63,68,69,71,72)]
+wind_lowest<-wind_fd[c(7,8,12,14,15,17,19,20,21,22,31,34,35,36,46,49,55,57,58,62,65,66,70)]
+wind_medium<-wind_fd[c(1,2,3,4,6,9,10,11,13,16,24,26,27,30,33,32,38,47,48,50,51,52,60,61,64,67,73)]
+wind_highest<-wind_fd[c(5,18,23,25,28,29,37,39,40,41,42,42,44,45,53,54,56,59,63,68,69,71,72)]
+
+t.sq <- seq(0,365, length=501)
+```
+
+### Temperature lowest vs medium altitude (two sample F-type-test)
+
+```{r pressure025, echo=TRUE, results=TRUE}
+setwd("...\FDA\lesson9")
+source("trace.R")
+source("Fstat.R")
+source("Fstattwosample.R")
+stat <- F.stat.twosample(x=temp_lowest, y=temp_medium, t.seq = t.sq, method=1)
+stat
+stat <- F.stat.twosample(x=temp_lowest, y=temp_medium, t.seq = t.sq, method=2, replications=500)
+stat$pvalue
+```
+The $H_0$ hypothesis comparing temperature data for lowest and medium altitude stations is rejected, statistical significant difference is observed.
+
+### Temperature lowest vs highest altitude (two sample F-type-test)
+
+```{r pressure026, echo=TRUE, results=TRUE}
+source("Fstattwosample.R")
+stat <- F.stat.twosample(x=temp_lowest, y=temp_highest, t.seq = t.sq, method=1)
+stat
+stat <- F.stat.twosample(x=temp_lowest, y=temp_highest, t.seq = t.sq, method=2, replications=500)
+stat$pvalue
+```
+For the lowest and highest altitude stations, the $H_0$ is  rejected, statistical significant difference is also observed.
+
+### Temperature medium vs highest altitude (two sample F-type-test)
+
+```{r pressure027, echo=TRUE, results=TRUE}
+source("Fstattwosample.R")
+stat <- F.stat.twosample(x=temp_medium, y=temp_highest, t.seq = t.sq, method=1)
+stat
+stat <- F.stat.twosample(x=temp_medium, y=temp_highest, t.seq = t.sq, method=2, replications=500)
+stat$pvalue
+```
+Statistical significant difference is observed, therefore The $H_0$ hypothesis between medium and highest altitude stations is rejected.
+
+
+### Applying fMANOVA for temperature and wind speed
+
+```{r pressure019, echo=TRUE, results=TRUE}
+x.weather <- list()
+x.weather[[1]] <- eval.fd(t.new2, temp_fd)
+x.weather[[2]] <- eval.fd(t.new2, wind_fd)
+
+
+
+temp.eval <- eval.fd(t.new2, temp_fd)
+
+
+weather_temp <- temp_fd
+weather_wind <- wind_fd
+
+own.basis.t <- list()
+own.basis.t[[1]] <- weather_temp$coefs
+own.basis.t[[2]] <- weather_wind$coefs
+own.cross.prod.mat.t <- inprod(temp_fd$basis, wind_fd$basis)
+
+fmanova.w <- fmanova.ptbfr(x.weather, group.label, int = c(0.5, 364.5),
+                           B = 5000, basis = "own", 
+                           own.basis = own.basis.t,
+                           own.cross.prod.mat = own.cross.prod.mat.t,
+                           criterion = "eBIC", commonK = "mean")
+summary(fmanova.w)
+
+```
+
+This tells us that wind speed and temperature groups of different altitudes are significantly different based on a FMANOVA test.
+
+### Pointwise fANOVA for wind speed
+
+The pointwise ANOVA p-values, Group means and Tukey HSD p-values have been plotted just for another variable, wind speed.
+
+```{r pressure020, echo=TRUE, results=FALSE}
+
+w.new2 <- seq(0, 365, length=1001)
+
+
+wind.eval <- eval.fd(t.new2, wind_fd)
+class(wind.eval)
+
+fANOVA.pointwise(data=wind.eval, groups=group.label, 
+                 t.seq=w.new2, alpha=0.05) 
+```
+
+Wind Speed functional variable shows us, different results compared to temperature variable. Pointwise ANOVA p-values are around or under the 0.05 bound, signifying the difference between the group means and as such is shows in the Group means figure. The Tukey HSD p-values between the 'Lowest altitude' and 'Highest altitude' are well under 0.05; therefore, implying a significant difference at a 95 percent confidence interval. However, same can not be said about the other two graphs that show the two groups(first-between Medium and Highest altitudes, and, Medium and Lowest altitudes) of being equal. Last two figures show that there is no significant difference when it comes to wind speed in medium altitude and the other two.
+
+### Functional ANOVA and MANOVA graphs for wind speed
+
+```{r pressure021, echo=TRUE, results=FALSE}
+plotFANOVA(x = wind.eval, int = c(1, 365))
+plotFANOVA(x = wind.eval, group.label = as.character(group.label),
+           int = c(1, 365))
+plotFANOVA(x = wind.eval, group.label = as.character(group.label),
+           int = c(1, 365), separately = TRUE)
+plotFANOVA(x = wind.eval, group.label = as.character(group.label),
+           int = c(1, 365), means = TRUE)
+
+```
+
+The FANOVA plots are as such of Temperature variable. We can conclude by the graphs that the stations at the lowest altitude have stations with (What is the y-axis?) and stations in the highest altitude group, the lowest. The groups peak at day 100, month of April, and lowest altitude stations also peak at day 200.
+
+The analysis of variance for our functional data has been performed for wind speed variable.
+
+```{r pressure022, echo=TRUE, results=TRUE}
+set.seed(123)
+(fanova4.fd <- fanova.tests(x = wind.eval, group.label = group.label, parallel = TRUE))
+```
+
+The p-values for all of the above mentioned test are yet below the 0.05, thus rejecting hypothesis $H_0$; stations with different altitudes do show significant difference in wind speed at 95% CI.
+
+### Functional basis for FP type test for wind speed
+
+The different approach for the same fANOVA test is shown below, providing us with same values for test statistics and p-values.
+
+```{r pressure023, echo=TRUE, results=TRUE}
+own.basis.w <- wind_fd$coefs
+own.cross.prod.mat.w <- inprod(wind_fd$basis, wind_fd$basis)
+
+set.seed(123)
+
+fanova.tests(wind.eval, group.label,
+             test = c("FP", "GPF", "Fmaxb", "TRP"),
+             params = list(paramFP = list(B.FP = 1000, basis = "own", own.basis=own.basis.w,
+                                        own.cross.prod.mat=own.cross.prod.mat.w
+                                        ),
+                           paramFmaxb = 1000,
+                           paramTRP = list(k = c(10, 15),
+                                           projection = "BM",
+                                           permutation = TRUE,
+                                           B.TRP = 1000)))
+```
+The FANOVA test for Temperature, just like for Wind Speed show significant p-values and so representing a difference in group means.
+
+### Two sample F-type-test for wind speed
+
+### Wind speed lowest vs medium altitude (two sample F-type-test)
+
+```{r pressure028, echo=TRUE, results=TRUE}
+source("Fstattwosample.R")
+stat <- F.stat.twosample(x=wind_lowest, y=wind_medium, t.seq = t.sq, method=1)
+stat
+stat <- F.stat.twosample(x=wind_lowest, y=wind_medium, t.seq = t.sq, method=2, replications=500)
+stat$pvalue
+```
+The $H_0$ hypothesis comparing wind speed data for lowest and medium altitude stations is not rejected, no statistical significant difference is observed.
+
+
+### Wind speed lowest vs highest altitude (two sample F-type-test)
+
+```{r pressure029, echo=TRUE, results=TRUE}
+source("Fstattwosample.R")
+stat <- F.stat.twosample(x=wind_lowest, y=wind_highest, t.seq = t.sq, method=1)
+stat
+stat <- F.stat.twosample(x=wind_lowest, y=wind_highest, t.seq = t.sq, method=2, replications=500)
+stat$pvalue
+```
+Lowest and highest altitude stations had the $H_0$ rejected, statistical significant difference is observed during whole period.
+
+### Wind speed medium vs highest altitude (two sample F-type-test)
+
+```{r pressure030, echo=TRUE, results=TRUE}
+source("Fstattwosample.R")
+stat <- F.stat.twosample(x=wind_medium, y=wind_highest, t.seq = t.sq, method=1)
+stat <- F.stat.twosample(x=wind_medium, y=wind_highest, t.seq = t.sq, method=2, replications=500)
+stat$pvalue
+```
+Wind speed data for medium and highest altitude stations, once again had $H_0$ rejected, no statistical significant difference is observed.
+
+## Conlcusions
+
+By performing functional data analysis on 73 weather stations we found meaningful insights for two variables: average temperature and average wind speed. First, we did data smoothing, and that helped us to make your data functional for further analysis.
+
+
+Descriptive statistics for average temperature showed us, that the peak for temperature  was at the day 200, which is the month of August; standard deviation for average temperature was the lowest for summer months and it was supported by covariance surface plot showing the dip for the same months. Analysis of first derivative showed  that up until about day 200 the average temperature mostly increases, later decrease is observed up until the end of the year. Second derivative showed that these changes happen steadily. Furthermore, principal component analysis was done, in total we needed 4 principal components to represent our data with little variation. There was an outlier in average temperature data, the most outlying curve is NAVACERRADA,PUERTO with depth about 0.027. Finally, we performed hypothesis testing by various tests for groups means by dividing chosen data set into 3 groups depending on the distance above sea level in meters. All tests have shown, that three groups are statistically different,  comparing them by two, we also found out that statistical significant difference is observed.
+
+
+We performed same analysis for average wind speed variable, but results here were not completely the same, as average wind speed data is not varying so much during the year. In descriptive statistics part, we did not find clear peak for mean. The standard deviation also looks more constant throughout the whole time period except at about the region of day 200 and this was supported by covariance surface and contour of it. First derivative of the average wind speed data also did not showed clear patter, but the second derivative showed, that changes are steady aswell. For principal component analysis, we took into account 7 principal components to result in 0.1 percent of variability. More outliers we found for average wind speed data: TARIFA, FUERTEVENTURA/AEROPUERTO,  LANZAROTE/AEROPUERTO, LAS PALMAS DE GRAN CANARIA, HIERRO/AEROPUERTO, IZANA. In hypothesis testing part, we also rejected hypothesis that all three group means are equal. Nonetheless, comparing these groups by two, we did not have enough evidence to reject hypothesis that group means are equal for medium and lowest altitude groups and medium and highest.
+
+
+Since the dataset we have used is about the weather, and the variables that were analyzed were the temperature and wind speed variables, our conclusions are clear, on how average temperature had its increases during the summer and wind speed wasn’t much affected by the time period. 
+
+
+Both average wind speed and temperature of 29 years showed steady changes across all 73 weather stations. However, it could be well noted on how temperature values were pretty similar across all of the weather stations, and quiet the opposite for wind speed.
+
+
+Though the results for functional variables are plain to see, it is also evident on how weather stations located in different locations of Spain, show their differences between each other in both functional variables.
