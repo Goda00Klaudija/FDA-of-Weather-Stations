@@ -1,4 +1,4 @@
-# Functional data analysis of of 73 spanish weather stations
+# Functional data analysis of 73 spanish weather stations
 
 The functional data analysis was performed on the weather data set 'aemet' from the R library ‘fda.usc’ based in Spain. It was collected every single day over the period of 29 years and the daily average was found. 
 
